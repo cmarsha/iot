@@ -1,0 +1,73 @@
+# export VAGRANT_HOME="/Users/bgoat/goinfre"
+
+# local box will be used
+# box generic/alpine38 (v4.2.14 currently released version) is downloaded from https://app.vagrantup.com/centos/boxes/7
+# as CentOS-7-x86_64-Vagrant-2004_01.VirtualBox.box
+# than run  [ vagrant box add my-box goinfre/CentOS-7-x86_64-Vagrant-2004_01.VirtualBox.box ]
+# program output:
+# ==> box: Box file was not detected as metadata. Adding it directly...
+# ==> box: Adding box 'locale-centos7' (v0) for provider:
+    # box: Unpacking necessary files from: file:///Users/bgoat/goinfre/8735b8d8-9dfe-402b-8985-de3192b1a1d9
+# ==> box: Successfully added box 'locale-centos7' (v0) for 'virtualbox'!
+# after that [vagrant up] can be used
+
+masterIp="192.168.56.110"
+agentIp="192.168.56.111"
+serverName="bgoat"
+serverWorkerName="cmarsha"
+
+$startServer = <<-SCRIPT
+      export INSTALL_K3S_EXEC="--bind-address=#{masterIp} --node-external-ip=#{masterIp} --flannel-iface=eth1 --write-kubeconfig-mode 644"
+      curl -sfL https://get.k3s.io | sh -
+      cp /var/lib/rancher/k3s/server/node-token /vagrant
+    SCRIPT
+
+$startServerWorker = <<-SCRIPT
+    export K3S_TOKEN="$(cat /vagrant/node-token)"
+    export K3S_URL=https://#{masterIp}:6443
+    export INSTALL_K3S_EXEC="--flannel-iface=eth1"
+    curl -sfL https://get.k3s.io | sh -
+  SCRIPT
+
+Vagrant.configure("2") do |config|
+
+    config.vm.box = "locale-centos7"
+
+    config.vm.define "#{serverName}" do | server |
+      server.vm.hostname = "#{serverName}S"
+      server.vm.network "private_network", ip: masterIp
+      server.vm.synced_folder "shared_files", "/vagrant", disabled: false
+
+      server.vm.provider "virtualbox" do |v|
+        v.name = "#{serverName}"
+        v.memory = 1024
+        v.cpus = 1
+      end
+
+      server.vm.provision "shell", privileged: true,  inline: $startServer 
+ 
+    end
+
+    config.vm.define "#{serverWorkerName}" do | serverWorker |
+      serverWorker.vm.hostname = "#{serverWorkerName}SW"
+      serverWorker.vm.network "private_network", ip: agentIp
+      serverWorker.vm.synced_folder "shared_files", "/vagrant", disabled: false
+      serverWorker.vm.provider "virtualbox" do |v|
+        v.name = "#{serverWorkerName}"
+        v.memory = 1024
+        v.cpus = 1
+      end
+
+      serverWorker.vm.provision "shell", privileged: true, inline:  $startServerWorker
+      # serverWorker.vm.provision "ansible" do |ansible|
+      #   ansible.playbook = "kubernetes-setup/node-playbook.yml"
+      #   ansible.extra_vars = {
+      #       node_ip: "192.168.50.#{i + 10}",
+      #   }
+      # end
+
+    end
+    
+end
+
+# vagrant halt
